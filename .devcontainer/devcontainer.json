@@ -1,0 +1,75 @@
+{
+  "name": "NetEye Userguide",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+
+  // Sphinx' conf.py requires UG_NETEYE_VERSION; FEATURE selects the master doc
+  // (index.rst for "prod"). Override per-shell with `export UG_NETEYE_VERSION=4.45`.
+  "containerEnv": {
+    "UG_NETEYE_VERSION": "4.44",
+    "FEATURE": "prod",
+    "VIRTUAL_ENV": "/opt/ug-venv",
+    "PIP_CACHE_DIR": "/home/vscode/.cache/pip"
+  },
+  "remoteEnv": {
+    "PATH": "/opt/ug-venv/bin:${containerEnv:PATH}:${containerWorkspaceFolder}/.devcontainer/bin"
+  },
+  "features": {
+    // Only needed for the Playwright suite under src/t/playwright.
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "22"
+    }
+  },
+
+  "forwardPorts": [8000, 8001],
+  "portsAttributes": {
+    "8000": {
+      "label": "Userguide (live reload)",
+      "onAutoForward": "notify"
+    },
+    "8001": {
+      "label": "Userguide (static build)",
+      "onAutoForward": "silent"
+    }
+  },
+
+  "mounts": [
+    "source=neteye-ug-pip-cache,target=/home/vscode/.cache/pip,type=volume",
+    "source=neteye-ug-npm-cache,target=/home/vscode/.npm,type=volume"
+  ],
+
+  "postCreateCommand": ".devcontainer/post-create.sh",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "trond-snekvik.simple-rst",
+        "streetsidesoftware.code-spell-checker",
+        "timonwong.shellcheck",
+        "redhat.vscode-yaml",
+        "ms-python.python",
+        "esbenp.prettier-vscode",
+        "ms-playwright.playwright"
+      ],
+      "settings": {
+        "files.eol": "\n",
+        "files.trimTrailingWhitespace": true,
+        "files.insertFinalNewline": true,
+        "editor.rulers": [100],
+        "python.defaultInterpreterPath": "/opt/ug-venv/bin/python",
+        "[restructuredtext]": {
+          "editor.tabSize": 3,
+          "editor.insertSpaces": true
+        },
+        "search.exclude": {
+          "sphinx/build/**": true,
+          "sphinx/source/_build/**": true
+        }
+      }
+    }
+  },
+
+  "remoteUser": "vscode"
+}
