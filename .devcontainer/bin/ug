@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# Devcontainer entrypoint for the NetEye Userguide. Wraps the sphinx toolchain
+# installed in /opt/ug-venv, so no throwaway virtualenv is needed.
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+BUILD_DIR="${REPO_ROOT}/sphinx/build/html"
+cd "${REPO_ROOT}"
+
+usage() {
+    cat <<EOF
+Usage: ug <command> [options]
+
+  build [-v X.YY] [-s]    One-shot HTML build into sphinx/build/html.
+                          -s passes -W to sphinx-build, so warnings fail the
+                          build, as the CI pipeline does. Expect that to fail on
+                          the dependencies-*.svg images, which come from an
+                          internal Wuerth Phoenix endpoint and are absent here.
+  serve [-v X.YY] [-p N]  Live reload on port 8000 (default). Edits under
+                          sphinx/source and sphinx/theme trigger an incremental
+                          rebuild. The first pass builds ~330 pages.
+  static [PORT]           Serve an existing build on port 8001 (default),
+                          without autobuild's injected livereload script.
+
+-v defaults to \$UG_NETEYE_VERSION, set in devcontainer.json. Lint with:
+prek run --all-files. For a full rebuild: rm -rf sphinx/build/html
+EOF
+}
+
+# The assets sphinx does not generate: version-switcher metadata (fetched from
+# the public site, so failure is soft -- the dropdown is simply empty) and the
+# version-independent logos that nginx serves from /static/img/ in production.
+prepare_build_dir() {
+    [ -n "${UG_NETEYE_VERSION:-}" ] || {
+        echo "[!] UG_NETEYE_VERSION is not set (e.g. ug $1 -v 4.44)" >&2
+        exit 1
+    }
+    mkdir -p "${BUILD_DIR}"
+    for f in versions.json last_archived_version.json; do
+        curl -sf -o "${BUILD_DIR}/${f}" "https://neteye.guide/${f}" \
+            || echo "[i] ${f} unavailable, version switcher will be empty"
+    done
+    cp -r "${REPO_ROOT}/static" "${BUILD_DIR}/"
+}
+
+CMD="${1:-}"
+[ $# -gt 0 ] && shift
+
+case "${CMD}" in
+build | serve)
+    STRICT=()
+    PORT=8000
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -v|--version) export UG_NETEYE_VERSION="$2"; shift 2 ;;
+            -s|--strict)  STRICT=(-W); shift ;;
+            -p|--port)    PORT="$2"; shift 2 ;;
+            -h|--help)    usage; exit 0 ;;
+            *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
+        esac
+    done
+
+    if [ ! -f ./sphinx/source/index.rst ]; then
+        echo "[!] sphinx/source looks empty. Run: sh build_init.sh main" >&2
+        exit 1
+    fi
+    prepare_build_dir "${CMD}"
+
+    if [ "${CMD}" = serve ]; then
+        export DEVELOPMENT_MODE=true
+        echo "[+] Serving UG ${UG_NETEYE_VERSION} on http://localhost:${PORT}"
+        # --host 0.0.0.0 so the devcontainer port forward actually reaches it.
+        exec sphinx-autobuild \
+            --conf-dir ./sphinx/ -b html \
+            --watch ./sphinx/theme/ \
+            --host 0.0.0.0 --port "${PORT}" \
+            ./sphinx/source "${BUILD_DIR}"
+    fi
+
+    echo "[+] Building UG ${UG_NETEYE_VERSION}"
+    sphinx-build \
+        --conf-dir ./sphinx/ -b html \
+        "${STRICT[@]}" \
+        ./sphinx/source "${BUILD_DIR}"
+    echo "[+] Done. Serve it with: ug static"
+    ;;
+
+static)
+    PORT="${1:-8001}"
+    if [ ! -f "${BUILD_DIR}/index.html" ]; then
+        echo "[!] No build found in ${BUILD_DIR}. Run 'ug build' first." >&2
+        exit 1
+    fi
+    echo "[+] Serving ${BUILD_DIR} on http://localhost:${PORT}"
+    cd "${BUILD_DIR}"
+    exec python3 -m http.server "${PORT}" --bind 0.0.0.0
+    ;;
+
+-h | --help | help | "")
+    usage
+    ;;
+
+*)
+    echo "Unknown command: ${CMD}" >&2
+    usage
+    exit 1
+    ;;
+esac
